@@ -138,7 +138,7 @@ if [[ $EUID -eq 0 ]]; then
 fi
 
 if [[ ! -d $ROOT/omarchy/themes/matrix ]]; then
-  echo "This script must be run from a clone of github.com/jandrusk/omarchy" >&2
+  echo "This script must be run from the Matrix/ directory of github.com/jandrusk/omarchy" >&2
   exit 1
 fi
 
