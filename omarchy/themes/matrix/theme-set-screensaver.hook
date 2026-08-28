@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# After an Omarchy theme change, keep screensaver branding aligned with Matrix.
+set -euo pipefail
+
+THEME="${1:-}"
+SRC="$HOME/.config/omarchy/themes/matrix/screensaver.txt"
+DST="$HOME/.config/omarchy/branding/screensaver.txt"
+STOCK="${OMARCHY_PATH:-/usr/share/omarchy}/logo.txt"
+
+[[ -f $SRC ]] || exit 0
+
+if [[ $THEME == matrix ]]; then
+  cp "$SRC" "$DST"
+elif [[ -f $STOCK ]]; then
+  cp "$STOCK" "$DST"
+fi

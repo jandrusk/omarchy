@@ -1,0 +1,5 @@
+# Never commit the Brave/Chrome extension private key.
+*.pem
+*~
+*.bak
+.DS_Store

@@ -1,0 +1,104 @@
+#!/bin/bash
+# Matrix digital-rain screensaver for the Omarchy Matrix theme.
+# Launched via ~/.config/omarchy/bin/omarchy-screensaver when this theme is current.
+
+screensaver_in_focus() {
+  hyprctl activewindow -j | jq -e '.class == "org.omarchy.screensaver"' >/dev/null 2>&1
+}
+
+exit_screensaver() {
+  hyprctl eval 'hl.config({ cursor = { invisible = false } })' &>/dev/null || hyprctl keyword cursor:invisible false &>/dev/null || true
+  pkill -x ttfx 2>/dev/null
+  pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null
+  exit 0
+}
+
+trap exit_screensaver SIGINT SIGTERM SIGHUP SIGQUIT
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEXT="${HERE}/screensaver.txt"
+COLORS="${HERE}/colors.toml"
+[[ -f $TEXT ]] || TEXT="${HOME}/.config/omarchy/branding/screensaver.txt"
+
+color() {
+  local key="$1" default="$2"
+  local value=""
+  if [[ -f $COLORS ]]; then
+    value=$(awk -F'=' -v k="$key" '
+      {
+        key=$1
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      }
+      key == k {
+        val=$2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+        gsub(/"/, "", val)
+        gsub(/^#/, "", val)
+        print val
+        exit
+      }
+    ' "$COLORS")
+  fi
+  printf '%s' "${value:-$default}"
+}
+
+# Palette from the Matrix theme (colors.toml), with phosphor-green fallbacks.
+BG=$(color background 050a05)
+ACCENT=$(color accent 00ff41)
+GREEN=$(color green 00d632)
+BRIGHT_GREEN=$(color bright_green 5cff7a)
+DARK_FG=$(color dark_foreground 3d7a48)
+MUTED=$(color muted 1f5c28)
+LIGHT_FG=$(color light_foreground c4f5c4)
+BRIGHT_FG=$(color bright_foreground e8ffe8)
+
+hex_to_osc() {
+  local h="${1#\#}"
+  printf '%s/%s/%s' "${h:0:2}" "${h:2:2}" "${h:4:2}"
+}
+
+# Match the near-black Matrix background instead of stock screensaver black.
+printf '\033]11;rgb:%s\007' "$(hex_to_osc "$BG")"
+printf '\033]10;rgb:%s\007' "$(hex_to_osc "$ACCENT")"
+printf '\033[?25l\033[H\033[2J'
+
+hyprctl eval 'hl.config({ cursor = { invisible = true } })' &>/dev/null || hyprctl keyword cursor:invisible true &>/dev/null
+
+tty=$(tty 2>/dev/null)
+
+wait_for_terminal_resize() {
+  local deadline=$((SECONDS + 2))
+  while ((SECONDS < deadline)) && [[ $(stty size 2>/dev/null) == "24 80" ]]; do
+    sleep 0.02
+  done
+}
+
+wait_for_terminal_resize
+
+while true; do
+  ttfx -i "$TEXT" \
+    --frame-rate 120 \
+    --canvas-width 0 \
+    --canvas-height 0 \
+    --reuse-canvas \
+    --anchor-canvas c \
+    --anchor-text c \
+    --no-eol \
+    --no-restore-cursor \
+    --terminal-background-color "#${BG}" \
+    matrix \
+    --highlight-color "$BRIGHT_FG" \
+    --rain-color-gradient "$BRIGHT_GREEN" "$ACCENT" "$GREEN" "$DARK_FG" "$MUTED" \
+    --rain-fall-delay-range 2-10 \
+    --rain-column-delay-range 1-4 \
+    --rain-time 22 \
+    --symbol-swap-chance 0.01 \
+    --final-gradient-stops "$ACCENT" "$BRIGHT_GREEN" "$LIGHT_FG" \
+    --final-gradient-direction radial &
+
+  while pgrep -t "${tty#/dev/}" -x ttfx >/dev/null; do
+    if read -n1 -t 1 || ! screensaver_in_focus; then
+      exit_screensaver
+    fi
+  done
+done

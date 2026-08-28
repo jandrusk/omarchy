@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Launch Brave, applying the Omarchy Matrix theme when starting a fresh process.
+set -euo pipefail
+
+APPLY="$HOME/.config/omarchy/themes/matrix/brave/omarchy-brave-matrix-apply"
+BRAVE=/usr/bin/brave
+
+brave_running() {
+  python3 - <<'PY'
+import os
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        exe = os.readlink(f"/proc/{pid}/exe")
+    except Exception:
+        continue
+    if exe.endswith("/brave"):
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+if [[ -x $APPLY ]] && ! brave_running; then
+  "$APPLY" enable >/dev/null || true
+fi
+
+exec "$BRAVE" "$@"

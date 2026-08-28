@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# Install or remove the Omarchy Matrix theme inside the Brave profile.
+set -euo pipefail
+
+ACTION="${1:-enable}"
+THEME_DIR="$HOME/.config/omarchy/themes/matrix/brave"
+FLAGS_FILE="$HOME/.config/brave-flags.conf"
+PROFILE_DIR="$HOME/.config/BraveSoftware/Brave-Browser/Default"
+NTP_DIR="$PROFILE_DIR/brave_ntp_custom_background_images"
+NTP_FILE="7c4a8d09-a297-4b8a-9c3e-0d160d00ff41.jpg"
+WALL="$HOME/.config/omarchy/themes/matrix/backgrounds/0-digital-rain.jpg"
+EXT_ID="$(tr -d '[:space:]' <"$THEME_DIR/extension_id")"
+EXT_DEST="$PROFILE_DIR/Extensions/$EXT_ID/1.0.0_0"
+CRX="$THEME_DIR/omarchy-matrix.crx"
+EXTERNAL_DIR="$HOME/.config/BraveSoftware/Brave-Browser/External Extensions"
+
+brave_running() {
+  python3 - <<'PY'
+import os
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        exe = os.readlink(f"/proc/{pid}/exe")
+    except Exception:
+        continue
+    if exe.endswith("/brave"):
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+remove_theme_from_flags() {
+  [[ -f $FLAGS_FILE ]] || return 0
+  python3 - "$FLAGS_FILE" "$THEME_DIR" <<'PY'
+import pathlib, sys
+flags_path = pathlib.Path(sys.argv[1])
+theme_dir = sys.argv[2]
+if not flags_path.exists():
+    raise SystemExit(0)
+out = []
+for line in flags_path.read_text().splitlines():
+    if line.startswith("--load-extension="):
+        parts = [p for p in line.split("=", 1)[1].split(",") if p and p != theme_dir]
+        if parts:
+            out.append("--load-extension=" + ",".join(parts))
+    else:
+        out.append(line)
+flags_path.write_text(("\n".join(out).rstrip() + "\n") if out else "")
+PY
+}
+
+stage_theme_files() {
+  mkdir -p "$EXT_DEST"
+  cp -f "$THEME_DIR/manifest.json" "$EXT_DEST/manifest.json"
+  rm -rf "$EXT_DEST/images"
+  cp -a "$THEME_DIR/images" "$EXT_DEST/images"
+}
+
+stage_external_crx() {
+  mkdir -p "$EXTERNAL_DIR"
+  if [[ -f $CRX ]]; then
+    python3 - "$EXTERNAL_DIR" "$EXT_ID" "$CRX" <<'PY'
+import json, sys
+from pathlib import Path
+external_dir, ext_id, crx = sys.argv[1:4]
+path = Path(external_dir) / f"{ext_id}.json"
+path.write_text(json.dumps({"external_crx": crx, "external_version": "1.0.0"}))
+PY
+  fi
+}
+
+remove_external_crx() {
+  rm -f "$EXTERNAL_DIR/$EXT_ID.json"
+}
+
+stage_ntp_image() {
+  mkdir -p "$NTP_DIR"
+  if [[ -f $WALL ]]; then
+    magick "$WALL" -resize 2560x1440^ -gravity center -extent 2560x1440 \
+      -modulate 72,92,100 -fill '#050a05' -colorize 18% \
+      -quality 88 "$NTP_DIR/$NTP_FILE"
+  fi
+}
+
+patch_preferences() {
+  local enable="$1"
+  python3 - "$PROFILE_DIR/Preferences" "$enable" "$NTP_FILE" "$EXT_ID" "$EXT_DEST" "$THEME_DIR/manifest.json" <<'PY'
+import json, sys, os, tempfile
+path, enable, ntp_file, ext_id, ext_dest, manifest_path = sys.argv[1:7]
+enable = enable == "1"
+if not os.path.exists(path):
+    sys.exit(0)
+with open(path, encoding="utf-8") as f:
+    prefs = json.load(f)
+with open(manifest_path, encoding="utf-8") as f:
+    manifest = json.load(f)
+
+ext = prefs.setdefault("extensions", {})
+settings = ext.setdefault("settings", {})
+browser_theme = prefs.setdefault("browser", {}).setdefault("theme", {})
+ntp = prefs.setdefault("brave", {}).setdefault("new_tab_page", {})
+
+if enable:
+    settings[ext_id] = {
+        "active_permissions": {"api": [], "explicit_host": [], "manifest_permissions": [], "scriptable_host": []},
+        "commands": {},
+        "content_settings": [],
+        "creation_flags": 1,
+        "from_webstore": False,
+        "granted_permissions": {"api": [], "explicit_host": [], "manifest_permissions": [], "scriptable_host": []},
+        "incognito_content_settings": [],
+        "incognito_preferences": {},
+        "location": 4,
+        "manifest": manifest,
+        "path": ext_dest,
+        "preferences": {},
+        "regular_only_preferences": {},
+        "state": 1,
+        "was_installed_by_default": False,
+        "was_installed_by_oem": False,
+        "withholding_permissions": False,
+    }
+    ext["theme"] = {"id": ext_id, "system_theme": 0}
+    browser_theme["is_grayscale"] = False
+    browser_theme["is_grayscale2"] = False
+    browser_theme["color_scheme2"] = 2
+    ntp["show_background_image"] = True
+    ntp["background"] = {
+        "type": "custom_image",
+        "random": False,
+        "selected_value": ntp_file,
+    }
+    names = list(ntp.get("custom_background_image_list") or [])
+    if ntp_file not in names:
+        names.append(ntp_file)
+    ntp["custom_background_image_list"] = names
+else:
+    settings.pop(ext_id, None)
+    theme = ext.get("theme") or {}
+    if theme.get("id") == ext_id:
+        ext["theme"] = {"id": "", "system_theme": 0}
+    bg = ntp.get("background") or {}
+    if bg.get("type") == "custom_image" and bg.get("selected_value") == ntp_file:
+        ntp["background"] = {"type": "brave", "random": True, "selected_value": ""}
+    ntp["custom_background_image_list"] = [
+        n for n in (ntp.get("custom_background_image_list") or []) if n != ntp_file
+    ]
+
+fd, tmp = tempfile.mkstemp(prefix="Preferences.", dir=os.path.dirname(path))
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    json.dump(prefs, f, separators=(",", ":"))
+    f.write("\n")
+os.replace(tmp, path)
+PY
+}
+
+case "$ACTION" in
+  enable)
+    remove_theme_from_flags
+    stage_theme_files
+    stage_external_crx
+    stage_ntp_image
+    if brave_running; then
+      echo "Matrix Brave theme files staged."
+      echo "Quit Brave fully, then reopen it (or run this script again after it exits) to apply."
+    else
+      patch_preferences 1
+      echo "Matrix Brave theme installed into the Brave profile."
+    fi
+    ;;
+  disable)
+    remove_theme_from_flags
+    remove_external_crx
+    if brave_running; then
+      echo "Disable queued. Quit Brave fully, then rerun: $0 disable"
+    else
+      patch_preferences 0
+      echo "Matrix Brave theme removed from the Brave profile."
+    fi
+    ;;
+  *)
+    echo "Usage: $0 enable|disable" >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,11 @@
+#!/bin/bash
+# Prefer a theme-shipped screensaver (Matrix digital rain) over the packaged TTE loop.
+
+CUSTOM="${HOME}/.local/state/omarchy/current/theme/screensaver"
+PACKAGED="${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-screensaver"
+
+if [[ -x $CUSTOM ]]; then
+  exec "$CUSTOM" "$@"
+fi
+
+exec "$PACKAGED" "$@"

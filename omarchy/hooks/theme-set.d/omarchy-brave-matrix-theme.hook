@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# After an Omarchy theme change, load or unload the Matrix Brave theme.
+set -euo pipefail
+
+THEME="${1:-}"
+APPLY="$HOME/.config/omarchy/themes/matrix/brave/omarchy-brave-matrix-apply"
+
+[[ -x $APPLY ]] || exit 0
+
+if [[ $THEME == matrix ]]; then
+  "$APPLY" enable
+else
+  "$APPLY" disable
+fi
